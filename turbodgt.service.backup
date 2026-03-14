@@ -1,0 +1,15 @@
+[Unit]
+Description=Turbo DGT v8.8 Trading Bot
+After=network.target
+
+[Service]
+Type=simple
+User=asus
+WorkingDirectory="/mnt/c/Users/Asus/Desktop/Api sever"
+ExecStart="/mnt/c/Users/Asus/Desktop/Api sever/run_bot.sh"
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

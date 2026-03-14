@@ -1,0 +1,22 @@
+# Environments
+.env
+.venv
+venv/
+venv_linux/
+__pycache__/
+*.pyc
+
+# Database
+*.db
+bot_state.db
+bot_stats.db
+trading_v8.db
+
+# Config
+config.json
+history.json
+bot_output.log
+
+# OS
+.DS_Store
+Thumbs.db

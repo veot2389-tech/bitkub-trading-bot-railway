@@ -1,0 +1,10 @@
+ปิดตัวที่รันอยู่ทั้งหมด 
+(ทั้งเก่าและใหม่)
+sudo systemctl stop turbodgt
+sudo pkill -9 python
+
+# 2. เริ่มต้นใหม่ด้วยตัวใหม่ล่าสุด (v8.8) ตัวเดียวเท่านั้น
+sudo systemctl restart turbodgt
+
+# 3. ตรวจสอบเวอร์ชันใน Log
+journalctl -u turbodgt -f

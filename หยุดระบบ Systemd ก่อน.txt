@@ -1,0 +1,11 @@
+# 1. หยุดระบบ Systemd ก่อน
+sudo systemctl stop turbodgt
+
+# 2. ฆ่า Process Python ที่อาจหลงเหลืออยู่ใน Linux ทั้งหมด
+sudo pkill -9 python
+
+# 3. เริ่มระบบใหม่ (พร้อมโค้ดที่ผมแก้เรื่องข้อมูลซ้ำแล้ว)
+sudo systemctl restart turbodgt
+
+# 4. ดูการทำงานที่สะอาดขึ้น
+journalctl -u turbodgt -f

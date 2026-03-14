@@ -1,0 +1,8 @@
+flask
+psycopg2-binary
+requests
+pyTelegramBotAPI
+numpy
+aiohttp
+websockets
+python-dotenv
