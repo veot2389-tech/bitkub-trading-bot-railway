@@ -304,25 +304,31 @@ class TurboDGT:
                     self.bot.send_message(m.chat.id, "❌ ไม่สามารถดึงข้อมูลสถานะได้ในขณะนี้")
             
             elif m.text == '💰 ยอดเงิน':
-                res = await self.driver.send_request("POST", "/api/v3/market/balances")
-                if res.get('error') == 0:
-                    txt = "💰 *Balance Summary:*\n"
-                    # อัปเดตยอดในตัวแปรหลักด้วย
-                    for b in res['result']:
-                        self.current_balances[b['symbol']] = {'available': b['available'], 'reserved': b['reserved']}
-                        
-                        if b['symbol'] in ['THB', 'BTC']:
-                            avail = float(b['available'])
-                            reserved = float(b['reserved'])
-                            total = avail + reserved
-                            if total > 0:
-                                txt += f"• *{b['symbol']}*:\n"
-                                txt += f"    ├ Avail: `{avail:.8f}`\n"
-                                txt += f"    ├ Rsrv: `{reserved:.8f}`\n"
-                                txt += f"    └ Total: `{total:.8f}`\n"
-                    self.bot.send_message(m.chat.id, txt, parse_mode="Markdown")
-                else:
-                    self.bot.send_message(m.chat.id, "❌ ไม่สามารถดึงยอดเงินสดจาก Bitkub ได้")
+                try:
+                    import requests as req, hmac, hashlib
+                    ts = str(int(time.time() * 1000))
+                    payload = f"{ts}POST/api/v3/market/balances"
+                    sig = hmac.new(API_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+                    headers = {"X-BTK-APIKEY": API_KEY, "X-BTK-SIGN": sig, "X-BTK-TIMESTAMP": ts, "Content-Type": "application/json"}
+                    r = req.post("https://api.bitkub.com/api/v3/market/balances", headers=headers, json={}, timeout=10)
+                    res = r.json()
+                    if res.get('error') == 0:
+                        txt = "💰 *Balance Summary:*\n"
+                        for b in res.get('result', []):
+                            if b['symbol'] in ['THB', 'BTC']:
+                                avail = float(b['available'])
+                                reserved = float(b['reserved'])
+                                total = avail + reserved
+                                if total > 0:
+                                    txt += f"• *{b['symbol']}*:\n"
+                                    txt += f"    ├ Avail: `{avail:.8f}`\n"
+                                    txt += f"    ├ Rsrv: `{reserved:.8f}`\n"
+                                    txt += f"    └ Total: `{total:.8f}`\n"
+                        self.bot.send_message(m.chat.id, txt, parse_mode="Markdown")
+                    else:
+                        self.bot.send_message(m.chat.id, f"❌ Bitkub Error: {res.get('error')}")
+                except Exception as e:
+                    self.bot.send_message(m.chat.id, f"❌ ดึงยอดไม่ได้: {e}")
             
             elif m.text == '🟢 เริ่มระบบ':
                 auto_trade_enabled = True
