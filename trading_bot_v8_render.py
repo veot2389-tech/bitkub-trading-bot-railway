@@ -174,8 +174,8 @@ class CoinState:
     def get_dynamic_grid_step(self, layer_count=0):
         mean, std, _ = self.get_stats()
         vol = (std / mean) if mean > 0 else DEFAULT_GRID_STEP
-        fib = [1.0, 1.0, 1.382, 1.618, 2.618, 4.236, 6.854]
-        return min(max(DEFAULT_GRID_STEP, vol) * fib[min(layer_count, 6)], 0.10)
+        fib = [1.0, 1.382, 1.618, 2.618, 4.236, 6.854]
+        return min(max(DEFAULT_GRID_STEP, vol) * fib[min(layer_count, 5)], 0.10)
 
 # --- BOT CORE ---
 class TurboDGT:
@@ -196,9 +196,123 @@ class TurboDGT:
 
     def _setup_telegram(self):
         @self.bot.message_handler(commands=['start'])
-        def start(m): self.bot.send_message(m.chat.id, "🚀 Turbo DGT Rich Online!")
-        @self.bot.message_handler(func=lambda m: m.text == '📊 สถานะบอท')
-        def status(m): self.bot.send_message(m.chat.id, f"📊 สถานะ: {'🟢 ปกติ' if self.running else '🔴 หยุด'}\n💰 กำไรวันนี้: {get_today_profit():,.2f} THB")
+        def start(m):
+            markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
+            markup.add('📊 สถานะบอท', '💰 ยอดเงิน', '🟢 เริ่มระบบ', '🔴 หยุดระบบ', '🔥 ขายด่วน')
+            self.bot.send_message(m.chat.id, "🚀 *[TURBO DGT v9.5 Render Quant]* พร้อมใช้งาน!", reply_markup=markup, parse_mode="Markdown")
+
+        @self.bot.message_handler(func=lambda m: True)
+        def handle(m):
+            global auto_trade_enabled
+            if m.text == '📊 สถานะบอท':
+                try:
+                    thb_avail = float(self.current_balances.get("THB", {}).get("available", 0))
+                    total_asset_value = sum((float(self.current_balances.get(c,{}).get("available",0)) + float(self.current_balances.get(c,{}).get("reserved",0))) * s.current_price for c,s in self.states.items())
+                    total_equity = thb_avail + total_asset_value
+                    
+                    txt = f"🚀 *[TURBO DGT v9.5 Render Quant]*\n"
+                    txt += f"📅 {datetime.now().strftime('%H:%M:%S')} | 💓 Pulse: `{self.price_update_count}`\n"
+                    txt += f"----------------------------\n"
+                    
+                    unrealized_total = 0.0
+                    for coin, s in self.states.items():
+                        mean, std, z = s.get_stats()
+                        l_count = len(s.layers)
+                        
+                        # Z-Score Visual
+                        z_dots = "⬜" * 5
+                        if z < -2: z_dots = "🔴🔴⬜⬜⬜"
+                        elif z < -1: z_dots = "🟨⬜⬜⬜⬜"
+                        elif z > 2: z_dots = "🟦🟦🟦🟦🟦"
+                        elif z > 1: z_dots = "🟦🟦⬜⬜⬜"
+
+                        txt += f"🔴 *{coin}*: `{s.current_price:,.2f}`\n"
+                        txt += f"Layer: `{l_count}/∞` | Z: `{z:+.1f}` {z_dots}\n"
+                        txt += f"----------------------------\n"
+                        txt += f"🎯 *Trading Targets:*\n"
+
+                        if s.layers:
+                            total_cost = sum(l['price'] * l['amount'] * 1.0025 for l in s.layers)
+                            total_amt = sum(l['amount'] for l in s.layers)
+                            avg_buy = total_cost / total_amt
+                            current_val = (total_amt * s.current_price * 0.9975)
+                            pl_amt = current_val - total_cost
+                            unrealized_total += pl_amt
+                            
+                            # Next Sell Target (1% profit net)
+                            next_sell = (avg_buy * 1.01) / 0.9975
+                            sell_dist = ((next_sell / s.current_price) - 1) * 100
+                            
+                            # Next Buy Target (Dynamic Grid)
+                            min_p = min(l['price'] for l in s.layers)
+                            next_buy = min_p * (1 - s.get_dynamic_grid_step(l_count))
+                            buy_dist = ((next_buy / s.current_price) - 1) * 100
+                            
+                            txt += f"• 🟢 Buy Target:  `{next_buy:,.2f}` ({buy_dist:+.2f}%)\n"
+                            txt += f"• 🔴 Sell Target: `{next_sell:,.2f}` ({sell_dist:+.2f}%)\n"
+                            txt += f"• 📊 Curr. P/L: `{pl_amt:+.2f} THB`\n"
+                        else:
+                            txt += f"• 🟢 Next Buy: `{s.current_price:,.2f}` (Entry 1)\n"
+                            txt += f"• ⚖️ Status: `Waiting for Entry`\n"
+                        
+                        txt += f"----------------------------\n"
+
+                    txt += f"💰 Today Profit: `{get_today_profit():,.2f}` THB\n"
+                    txt += f"📊 Total Unrealized: `{unrealized_total:+.2f}` THB\n"
+                    txt += f"💵 Total Equity: `{total_equity:,.2f}` THB\n"
+                    txt += f"🤖 Auto Trade: {'🟢 ON' if auto_trade_enabled else '🔴 OFF'}\n"
+                    
+                    self.bot.send_message(m.chat.id, txt, parse_mode="Markdown")
+                except Exception as e:
+                    logger.error(f"Status Error: {e}")
+                    self.bot.send_message(m.chat.id, "❌ ไม่สามารถดึงข้อมูลสถานะได้ในขณะนี้")
+            
+            elif m.text == '💰 ยอดเงิน':
+                balance_txt = "💰 *Balance Summary:*\n"
+                for k, v in self.current_balances.items():
+                    total = float(v.get('available', 0)) + float(v.get('reserved', 0))
+                    if total > 0:
+                        balance_txt += f"• *{k}*: `{total:,.4f}`\n"
+                self.bot.send_message(m.chat.id, balance_txt, parse_mode="Markdown")
+            
+            elif m.text == '🟢 เริ่มระบบ':
+                auto_trade_enabled = True
+                self.bot.send_message(m.chat.id, "🟢 *เริ่มการเทรดอัตโนมัติ*", parse_mode="Markdown")
+            
+            elif m.text == '🔴 หยุดระบบ':
+                auto_trade_enabled = False
+                self.bot.send_message(m.chat.id, "🔴 *หยุดการเทรดอัตโนมัติ*", parse_mode="Markdown")
+            
+            elif m.text == '🔥 ขายด่วน':
+                markup = telebot.types.InlineKeyboardMarkup()
+                markup.add(telebot.types.InlineKeyboardButton("✅ ยืนยันขายล้างพอร์ต", callback_data="panic_confirm"), 
+                           telebot.types.InlineKeyboardButton("❌ ยกเลิก", callback_data="panic_cancel"))
+                self.bot.send_message(m.chat.id, "⚠️ *Panic Sell?* คุณต้องการขายเหรียญทั้งหมดที่ราคาตลาดทันทีหรือไม่?", reply_markup=markup, parse_mode="Markdown")
+
+        @self.bot.callback_query_handler(func=lambda call: True)
+        def callback(call):
+            if call.data == "panic_confirm":
+                global auto_trade_enabled
+                auto_trade_enabled = False
+                asyncio.run_coroutine_threadsafe(self.do_panic_sell(), asyncio.get_event_loop())
+                self.bot.edit_message_text("🔥 *กำลังขายล้างพอร์ต...*", call.message.chat.id, call.message.message_id, parse_mode="Markdown")
+            elif call.data == "panic_cancel":
+                self.bot.edit_message_text("❌ ยกเลิกการขายด่วน", call.message.chat.id, call.message.message_id)
+
+    async def do_panic_sell(self):
+        for c, s in self.states.items():
+            bal = float(self.current_balances.get(c, {}).get("available", 0))
+            if bal > 1e-6: # เกิน 0
+                res = await self.driver.send_request("POST", "/api/v3/market/place-ask", {"sym":f"{c.lower()}_thb","amt":self.driver.clean_amount(bal),"rat":0,"typ":"market"})
+                if res.get("error") == 0:
+                    s.layers = []
+                    update_db_layers(c, [])
+                    await self.send_tg(f"🔥 *Panic Sold {c}* สำเร็จ!")
+        await self.send_tg("🏁 *จบภารกิจล้างพอร์ต*")
+
+    async def send_tg(self, text):
+        try: self.bot.send_message(TELEGRAM_CHAT_ID, text, parse_mode="Markdown")
+        except: pass
 
     async def ws_handler(self):
         while self.running:
