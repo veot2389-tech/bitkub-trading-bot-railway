@@ -146,9 +146,15 @@ def load_db_layers():
     rows = db.execute("SELECT coin, price, amount FROM layers", fetch=True)
     data = {}
     if rows:
+        logger.info(f"📊 Found {len(rows)} total records in 'layers' table.")
         for r in rows:
-            if r['coin'] not in data: data[r['coin']] = []
-            data[r['coin']].append({"price": float(r['price']), "amount": float(r['amount'])})
+            c = str(r['coin']).strip().upper()
+            if c not in data: data[c] = []
+            data[c].append({"price": float(r['price']), "amount": float(r['amount'])})
+        for c, l in data.items():
+            logger.info(f"✅ Loaded {len(l)} layers for {c}")
+    else:
+        logger.warning("⚠️ No layers found in database.")
     return data
 
 def get_today_profit():
@@ -443,10 +449,14 @@ class TurboDGT:
             init_db()
             stored, histories = load_db_layers(), load_bot_history()
             for c, l in stored.items(): 
-                if c in self.states: self.states[c].layers = l
+                coin_key = c.upper()
+                if coin_key in self.states: 
+                    self.states[coin_key].layers = l
+                    logger.info(f"💾 Applied {len(l)} layers to {coin_key} state.")
             for c, h in histories.items():
-                if c in self.states: self.states[c].price_history = h
-            logger.info("✅ Database and history loaded.")
+                coin_key = c.upper()
+                if coin_key in self.states: self.states[coin_key].price_history = h
+            logger.info("✅ Database and history fully applied.")
         except Exception as e:
             logger.error(f"⚠️ Database init failed but continuing: {e}")
 
