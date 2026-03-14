@@ -6,3 +6,4 @@ aiohttp
 websockets
 python-dotenv
 bitkub-async
+rich

@@ -13,6 +13,7 @@ import websockets
 import telebot
 from flask import Flask, jsonify
 import signal
+import argparse
 from datetime import datetime
 from bitkub_async import BitkubAsyncDriver
 from dotenv import load_dotenv
@@ -20,30 +21,24 @@ from dotenv import load_dotenv
 # Load .env for local testing, Railway will use its own Env Vars
 load_dotenv()
 
-# --- SETTINGS & ENV VARS ---
-# Priority: Environment Variables > config.json
-if os.path.exists("config.json"):
-    with open("config.json") as f:
-        cfg = json.load(f)
-else:
-    cfg = {}
-
-API_KEY = os.environ.get("API_KEY", cfg.get("api_key", ""))
-API_SECRET = os.environ.get("API_SECRET", cfg.get("api_secret", ""))
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", cfg.get("telegram_token", ""))
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", cfg.get("telegram_chat_id", ""))
-DATABASE_URL = os.environ.get("DATABASE_URL") # Required for Railway/Supabase
-
-SYMBOLS = ["thb_btc"]
-MIN_TRADE_THB = 10 
-DEFAULT_GRID_STEP = float(os.environ.get("GRID_STEP_PCT", cfg.get("grid_step_pct", 0.5))) / 100
-BUDGET_UTILIZATION = float(os.environ.get("BUDGET_UTILIZATION_PCT", cfg.get("budget_utilization_pct", 0.95)))
-MAX_AMT_PER_LAYER = float(os.environ.get("MAX_AMOUNT_PER_LAYER", cfg.get("max_amount_per_layer", 2000.0)))
-auto_trade_enabled = True # 🟢 เริ่มต้นให้ทำงานอัตโนมัติ
+# --- ARGUMENTS ---
+parser = argparse.ArgumentParser(description="TurboDGT Railway v8.8")
+parser.add_argument("-logFile", "--log-file", help="Path to the log file")
+args, unknown = parser.parse_known_args()
 
 # --- LOGGING ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+log_handlers = [logging.StreamHandler()]
+if args.log_file:
+    log_handlers.append(logging.FileHandler(args.log_file, encoding='utf-8'))
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=log_handlers
+)
 logger = logging.getLogger("TurboDGT-Railway")
+
+# --- SETTINGS & ENV VARS ---
 
 # --- DATABASE (Postgres / Supabase) ---
 class DatabaseManager:

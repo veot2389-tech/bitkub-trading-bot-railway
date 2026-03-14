@@ -11,31 +11,28 @@ import websockets
 import telebot
 from flask import Flask, jsonify
 import signal
+import argparse
 from datetime import datetime
 from bitkub_async import BitkubAsyncDriver
 
-# --- SETTINGS ---
-with open("config.json") as f:
-    cfg = json.load(f)
-
-API_KEY = cfg.get("api_key", "")
-API_SECRET = cfg.get("api_secret", "")
-TELEGRAM_TOKEN = cfg.get("telegram_token", "")
-TELEGRAM_CHAT_ID = cfg.get("telegram_chat_id", "")
-SYMBOLS = ["thb_btc"]
-MIN_TRADE_THB = 10 
-DEFAULT_GRID_STEP = cfg.get("grid_step_pct", 0.5) / 100
-
-def get_max_layers(total_equity, num_coins):
-    usage_limit = cfg.get("budget_utilization_pct", 0.95)
-    if num_coins <= 0 or total_equity <= 0: return 1
-    max_l = int((total_equity * usage_limit) / (MIN_TRADE_THB * num_coins))
-    return max(1, max_l)
-AUTO_TRADE_ENABLED = True
+# --- ARGUMENTS ---
+parser = argparse.ArgumentParser(description="TurboDGT Trading Bot v8.8")
+parser.add_argument("-logFile", "--log-file", help="Path to the log file")
+args, unknown = parser.parse_known_args()
 
 # --- LOGGING ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+log_handlers = [logging.StreamHandler()]
+if args.log_file:
+    log_handlers.append(logging.FileHandler(args.log_file, encoding='utf-8'))
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=log_handlers
+)
 logger = logging.getLogger("TurboDGT-Math-v8.8")
+
+# --- SETTINGS ---
 
 # --- DATABASE ---
 DB_STATS = "bot_stats.db" # 📊 เก็บประวัติ/กำไร/สถิติ

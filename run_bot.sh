@@ -4,4 +4,4 @@ cd "/mnt/c/Users/Asus/Desktop/Api sever"
 if [ -d "venv" ]; then
     source venv/bin/activate
 fi
-exec python3 trading_bot_v8.py
+exec python3 trading_bot_v8.py "$@"
