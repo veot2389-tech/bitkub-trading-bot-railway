@@ -14,7 +14,7 @@ import telebot
 from flask import Flask, jsonify
 import signal
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from bitkub_async import BitkubAsyncDriver
 from dotenv import load_dotenv
 from rich.console import Console
@@ -210,8 +210,10 @@ class TurboDGT:
                     total_asset_value = sum((float(self.current_balances.get(c,{}).get("available",0)) + float(self.current_balances.get(c,{}).get("reserved",0))) * s.current_price for c,s in self.states.items())
                     total_equity = thb_avail + total_asset_value
                     
-                    txt = f"🚀 *[TURBO DGT v9.5 Render Quant]*\n"
-                    txt += f"📅 {datetime.now().strftime('%H:%M:%S')} | 💓 Pulse: `{self.price_update_count}`\n"
+                    txt = f"🚀 *[TURBO DGT v9.6 Gold Quant]*\n"
+                    # ปรับเป็นเวลาไทย (UTC+7)
+                    thai_now = datetime.now(timezone(timedelta(hours=7)))
+                    txt += f"📅 {thai_now.strftime('%H:%M:%S')} | 💓 Pulse: `{self.price_update_count}`\n"
                     txt += f"----------------------------\n"
                     
                     unrealized_total = 0.0
@@ -344,6 +346,8 @@ class TurboDGT:
                                 if coin:
                                     self.states[coin].update_price(float(inner["last"]))
                                     self.price_update_count += 1
+                                    if self.price_update_count % 5 == 0:
+                                        logger.info(f"💓 Pulse: {self.price_update_count} | {coin}: {inner['last']}")
                         except: continue
             except Exception as e:
                 logger.error(f"❌ WS Error: {e}")
