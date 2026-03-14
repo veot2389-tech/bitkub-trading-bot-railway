@@ -216,7 +216,7 @@ class TurboDGT:
                     total_asset_value = sum((float(self.current_balances.get(c,{}).get("available",0)) + float(self.current_balances.get(c,{}).get("reserved",0))) * s.current_price for c,s in self.states.items())
                     total_equity = thb_avail + total_asset_value
                     
-                    txt = f"🚀 *[TURBO DGT v9.8 DYNAMIC-FIBO-V2]*\n"
+                    txt = f"🚀 *[TURBO DGT v9.9 ULTRA-AGGRESSIVE]*\n"
                     # ปรับเป็นเวลาไทย (UTC+7)
                     thai_now = datetime.now(timezone(timedelta(hours=7)))
                     txt += f"📅 {thai_now.strftime('%H:%M:%S')} | 💓 Pulse: `{self.price_update_count}`\n"
