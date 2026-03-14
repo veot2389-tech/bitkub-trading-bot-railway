@@ -331,12 +331,17 @@ class TurboDGT:
                 ticker = await self.driver.send_request("GET", "/api/market/ticker")
                 if ticker and isinstance(ticker, dict):
                     for coin, state in self.states.items():
-                        sym = f"THB_{coin.upper()}"
-                        if sym in ticker and ticker[sym].get("last"):
-                            price = float(ticker[sym]["last"])
+                        # ค้นหาเหรียญแบบยืดหยุ่น (เช่น THB_BTC หรือ BTC_THB)
+                        price = 0
+                        for sym, data in ticker.items():
+                            if coin.upper() in sym.upper() and "THB" in sym.upper():
+                                price = float(data.get("last", 0))
+                                break
+                        
+                        if price > 0:
                             state.update_price(price)
                             self.price_update_count += 1
-                            if self.price_update_count % 10 == 0:
+                            if self.price_update_count % 5 == 0:
                                 logger.info(f"💓 Pulse: {self.price_update_count} | {coin}: {price:,.2f}")
             except Exception as e:
                 logger.warning(f"⚠️ Price poll error: {e}")
@@ -368,6 +373,9 @@ class TurboDGT:
                                         break
                                 if coin:
                                     self.states[coin].update_price(float(inner["last"]))
+                                    self.price_update_count += 1
+                                    if self.price_update_count % 10 == 0:
+                                        logger.info(f"💓 WS Pulse: {self.price_update_count} | {coin}: {inner['last']}")
                         except: continue
             except Exception as e:
                 logger.warning(f"⚠️ WS disconnected: {e}. Reconnecting in 15s...")
