@@ -305,12 +305,22 @@ class TurboDGT:
             
             elif m.text == '💰 ยอดเงิน':
                 try:
-                    import requests as req, hmac, hashlib
-                    ts = str(int(time.time() * 1000))
-                    payload = f"{ts}POST/api/v3/market/balances"
-                    sig = hmac.new(API_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
-                    headers = {"X-BTK-APIKEY": API_KEY, "X-BTK-SIGN": sig, "X-BTK-TIMESTAMP": ts, "Content-Type": "application/json"}
-                    r = req.post("https://api.bitkub.com/api/v3/market/balances", headers=headers, json={}, timeout=10)
+                    import requests as req, hmac, hashlib, json as _json
+                    # ดึง Server Time จาก Bitkub ก่อน (สำคัญมาก! ใช้ local time จะ Error)
+                    ts = int(req.get("https://api.bitkub.com/api/v3/servertime", timeout=5).json())
+                    path = "/api/v3/market/balances"
+                    body = {"ts": ts}
+                    body_str = _json.dumps(body, separators=(',', ':'))
+                    message = f"{ts}POST{path}{body_str}"
+                    sig = hmac.new(API_SECRET.encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
+                    headers = {
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                        "X-BTK-APIKEY": API_KEY,
+                        "X-BTK-TIMESTAMP": str(ts),
+                        "X-BTK-SIGN": sig
+                    }
+                    r = req.post(f"https://api.bitkub.com{path}", headers=headers, data=body_str, timeout=10)
                     res = r.json()
                     if res.get('error') == 0:
                         txt = "💰 *Balance Summary:*\n"
@@ -326,7 +336,7 @@ class TurboDGT:
                                     txt += f"    └ Total: `{total:.8f}`\n"
                         self.bot.send_message(m.chat.id, txt, parse_mode="Markdown")
                     else:
-                        self.bot.send_message(m.chat.id, f"❌ Bitkub Error: {res.get('error')}")
+                        self.bot.send_message(m.chat.id, f"❌ Bitkub Error: {res.get('error')} | {res}")
                 except Exception as e:
                     self.bot.send_message(m.chat.id, f"❌ ดึงยอดไม่ได้: {e}")
             
