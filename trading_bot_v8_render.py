@@ -11,7 +11,7 @@ import math
 import aiohttp
 import websockets
 import telebot
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request, abort
 import signal
 import argparse
 from datetime import datetime, timedelta, timezone
@@ -193,12 +193,39 @@ class TurboDGT:
         self.app = Flask(__name__)
         self._setup_flask()
         self._setup_telegram()
+        # ตั้ง Webhook ทันทีตอน Init เพื่อฆ่า Polling ทุกตัว
+        self._setup_webhook()
+
+    def _setup_webhook(self):
+        try:
+            render_url = os.getenv("RENDER_EXTERNAL_URL", "https://bitkub-trading-bot-railway.onrender.com")
+            webhook_url = f"{render_url}/webhook"
+            logger.info(f"🌐 Setting Telegram Webhook to: {webhook_url}")
+            self.bot.remove_webhook()
+            time.sleep(1)
+            result = self.bot.set_webhook(url=webhook_url)
+            if result:
+                logger.info("✅ Webhook set successfully! Polling is now DEAD.")
+            else:
+                logger.error("❌ Webhook setup FAILED!")
+        except Exception as e:
+            logger.error(f"❌ Webhook error: {e}")
 
     def _setup_flask(self):
         @self.app.route("/")
         def index(): return "⚡ Turbo DGT Rich Active"
         @self.app.route("/health")
         def health(): return jsonify({"status": "healthy", "time": datetime.now().isoformat()}), 200
+
+        @self.app.route("/webhook", methods=['POST'])
+        def webhook():
+            if request.headers.get('content-type') == 'application/json':
+                json_string = request.get_data().decode('utf-8')
+                update = telebot.types.Update.de_json(json_string)
+                self.bot.process_new_updates([update])
+                return ''
+            else:
+                abort(403)
 
     def _setup_telegram(self):
         @self.bot.message_handler(commands=['start'])
@@ -277,12 +304,25 @@ class TurboDGT:
                     self.bot.send_message(m.chat.id, "❌ ไม่สามารถดึงข้อมูลสถานะได้ในขณะนี้")
             
             elif m.text == '💰 ยอดเงิน':
-                balance_txt = "💰 *Balance Summary:*\n"
-                for k, v in self.current_balances.items():
-                    total = float(v.get('available', 0)) + float(v.get('reserved', 0))
-                    if total > 0:
-                        balance_txt += f"• *{k}*: `{total:,.4f}`\n"
-                self.bot.send_message(m.chat.id, balance_txt, parse_mode="Markdown")
+                res = await self.driver.send_request("POST", "/api/v3/market/balances")
+                if res.get('error') == 0:
+                    txt = "💰 *Balance Summary:*\n"
+                    # อัปเดตยอดในตัวแปรหลักด้วย
+                    for b in res['result']:
+                        self.current_balances[b['symbol']] = {'available': b['available'], 'reserved': b['reserved']}
+                        
+                        if b['symbol'] in ['THB', 'BTC']:
+                            avail = float(b['available'])
+                            reserved = float(b['reserved'])
+                            total = avail + reserved
+                            if total > 0:
+                                txt += f"• *{b['symbol']}*:\n"
+                                txt += f"    ├ Avail: `{avail:.8f}`\n"
+                                txt += f"    ├ Rsrv: `{reserved:.8f}`\n"
+                                txt += f"    └ Total: `{total:.8f}`\n"
+                    self.bot.send_message(m.chat.id, txt, parse_mode="Markdown")
+                else:
+                    self.bot.send_message(m.chat.id, "❌ ไม่สามารถดึงยอดเงินสดจาก Bitkub ได้")
             
             elif m.text == '🟢 เริ่มระบบ':
                 auto_trade_enabled = True
@@ -467,8 +507,7 @@ class TurboDGT:
             except: pass
             await asyncio.sleep(600) # 10 mins
 
-    async def run_all(self):
-        # 1. ดึงราคาเริ่มต้นจาก REST API ก่อน เพื่อความรวดเร็วและไม่ให้ราคาเป็น 0.00
+    async def fetch_initial_prices(self):
         logger.info("📡 Fetching initial prices from Bitkub...")
         try:
             ticker = await self.driver.send_request("GET", "/api/market/ticker")
@@ -510,22 +549,55 @@ class TurboDGT:
         except Exception as e:
             logger.error(f"⚠️ Database init failed but continuing: {e}")
 
-        # 3. รัน Task ทั้งหมด
-        logger.info("🚀 Starting all background tasks...")
-        await asyncio.gather(self.price_poller(), self.ws_handler(), self.trading_logic(), self.keep_alive())
-
-def telegram_polling_with_retry(tg_bot):
-    """Telegram polling with auto-retry on Error 409"""
-    while True:
+    async def run_all(self):
+        # Setup Webhook before starting tasks
+        render_url = os.getenv("RENDER_EXTERNAL_URL", "https://bitkub-trading-bot-railway.onrender.com")
+        webhook_url = f"{render_url}/webhook"
+        logger.info(f"🌐 Setting Telegram Webhook: {webhook_url}")
+        
+        # Clear old webhook and set new one (solves 409 conflict 100%)
         try:
-            logger.info("📱 Starting Telegram polling...")
-            tg_bot.infinity_polling(skip_pending=True, timeout=30)
+            self.bot.remove_webhook()
+            await asyncio.sleep(1)
+            self.bot.set_webhook(url=webhook_url)
         except Exception as e:
-            logger.warning(f"⚠️ Telegram polling crashed: {e}. Restarting in 10s...")
-            time.sleep(10)
+            logger.error(f"⚠️ Webhook setup failed: {e}")
+
+        # 1. Fetch initial prices
+        await self.fetch_initial_prices()
+
+        # 2. Initialize database
+        logger.info("🗄️ Initializing Supabase database...")
+        try:
+            init_db()
+            stored, histories = load_db_layers(), load_bot_history()
+            for c, l in stored.items(): 
+                coin_key = c.upper()
+                if coin_key in self.states: 
+                    self.states[coin_key].layers = l
+                    logger.info(f"💾 Applied {len(l)} layers to {coin_key} state.")
+            for c, h in histories.items():
+                coin_key = c.upper()
+                if coin_key in self.states: self.states[coin_key].price_history = h
+            logger.info("✅ Database and history fully applied.")
+        except Exception as e:
+            logger.error(f"⚠️ Database init failed but continuing: {e}")
+
+        # 3. Run all async tasks
+        logger.info("🚀 Starting all background tasks...")
+        await asyncio.gather(
+            self.price_poller(),
+            self.ws_handler(),
+            self.trading_logic(),
+            self.keep_alive()
+        )
 
 if __name__ == "__main__":
     bot = TurboDGT()
-    threading.Thread(target=lambda: telegram_polling_with_retry(bot.bot), daemon=True).start()
+    # Run Flask in background thread for Webhooks/Health
     threading.Thread(target=lambda: bot.app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), use_reloader=False), daemon=True).start()
-    asyncio.run(bot.run_all())
+    # Run the main async loop
+    try:
+        asyncio.run(bot.run_all())
+    except KeyboardInterrupt:
+        pass
