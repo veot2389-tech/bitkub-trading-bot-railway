@@ -216,7 +216,7 @@ class TurboDGT:
                     total_asset_value = sum((float(self.current_balances.get(c,{}).get("available",0)) + float(self.current_balances.get(c,{}).get("reserved",0))) * s.current_price for c,s in self.states.items())
                     total_equity = thb_avail + total_asset_value
                     
-                    txt = f"🚀 *[TURBO DGT v9.7 FIXED-RENDER]*\n"
+                    txt = f"🚀 *[TURBO DGT v9.8 DYNAMIC-FIBO-V2]*\n"
                     # ปรับเป็นเวลาไทย (UTC+7)
                     thai_now = datetime.now(timezone(timedelta(hours=7)))
                     txt += f"📅 {thai_now.strftime('%H:%M:%S')} | 💓 Pulse: `{self.price_update_count}`\n"
@@ -397,29 +397,57 @@ class TurboDGT:
                 # Render Rich Table to logs
                 if int(time.time()) % 60 < 5: print_status_table(self.states, total_equity)
 
-                max_l = int((total_equity * BUDGET_UTILIZATION) / (MIN_TRADE_THB * len(self.states))) if len(self.states)>0 else 1
-                dynamic_amt = max(MIN_TRADE_THB, min((total_equity * BUDGET_UTILIZATION) / (len(self.states) * max_l), MAX_AMT_PER_LAYER))
+                # --- ULTRA AGGRESSIVE FIBONACCI LOGIC ---
+                fib_scale = [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610]
+                base_unit_pct = 0.02 # เริ่มต้นที่ 2% ของพอร์ตเพื่อความดุดัน
+                
+                if int(time.time()) % 60 < 5: print_status_table(self.states, total_equity)
 
                 for coin, state in self.states.items():
                     if state.current_price <= 0 or state.is_trading: continue
                     v3_sym = f"{coin.lower()}_thb"
-                    # Sell/Buy Logic... (Same as v8 lite)
+                    
+                    l_idx = len(state.layers)
+                    fib_factor = fib_scale[min(l_idx, len(fib_scale)-1)]
+                    
+                    # คำนวณเงินซื้อแบบทุ่มสุดตัว: (Equity * base) * fib
+                    dynamic_amt = (total_equity * base_unit_pct) * fib_factor
+                    # ปรับให้เหมาะสมกับเงินสดที่มีจริง (ใช้ให้เกลี้ยง)
+                    dynamic_amt = max(MIN_TRADE_THB, min(dynamic_amt, thb_avail)) 
+
+                    # Sell Logic: ต้องคุ้มค่าธรรมเนียม (หัก 0.5% แล้วต้องกำไร > 1%)
                     if state.layers:
-                        avg_buy = sum(l['price']*l['amount']*1.0025 for l in state.layers)/sum(l['amount'] for l in state.layers)
-                        if (state.current_price*0.9975/avg_buy)-1 >= 0.01:
+                        # ทุนรวมสะสม (รวมค่าธรรมเนียมขาซื้อ 0.25% แล้ว)
+                        total_cost = sum(l['price'] * l['amount'] * 1.0025 for l in state.layers)
+                        total_amt = sum(l['amount'] for l in state.layers)
+                        
+                        # คำนวณเงินที่จะได้รับหลังหักขาขาย 0.25%
+                        expected_revenue = (total_amt * state.current_price) * 0.9975
+                        
+                        # กำไรสุทธิหลังหักทุกอย่าง
+                        net_profit = expected_revenue - total_cost
+                        net_profit_pct = (net_profit / total_cost) * 100 if total_cost > 0 else 0
+                        
+                        if net_profit_pct >= 1.0: # กำไรเนื้อๆ 1% หลังหักค่าธรรมเนียม
                             state.is_trading = True
+                            logger.info(f"💰 Selling {coin} | Net Profit: {net_profit:,.2f} THB ({net_profit_pct:+.2f}%)")
                             avail = float(self.current_balances.get(coin,{}).get("available",0))
                             if await self.driver.send_request("POST", "/api/v3/market/place-ask", {"sym":v3_sym,"amt":self.driver.clean_amount(avail),"rat":0,"typ":"market"}):
                                 update_db_layers(coin, []); state.layers = []
+                                await self.send_tg(f"💰 *PROFIT TAKEN!* {coin}\n📈 Net Profit: `{net_profit:,.2f}` THB (`{net_profit_pct:+.2f}%`)")
                             state.is_trading = False
-                    if thb_avail >= dynamic_amt:
-                        if not state.layers or (len(state.layers) < max_l and state.current_price <= min(l['price'] for l in state.layers)*(1-state.get_dynamic_grid_step(len(state.layers)))):
+
+                    # Buy Logic: Fibonacci Dynamic Grid
+                    if thb_avail >= dynamic_amt and thb_avail >= MIN_TRADE_THB:
+                        if not state.layers or (state.current_price <= min(l['price'] for l in state.layers)*(1-state.get_dynamic_grid_step(l_idx))):
                             state.is_trading = True
+                            logger.info(f"⚔️ Aggressive Buy {coin} Layer {l_idx+1} | Amt: {dynamic_amt:,.2f} THB (Fib: {fib_factor}x)")
                             buy_res = await self.driver.send_request("POST", "/api/v3/market/place-bid", {"sym":v3_sym,"amt":dynamic_amt,"rat":0,"typ":"market"})
                             if buy_res.get("error") == 0:
                                 bought = (dynamic_amt * 0.9975) / state.current_price
                                 state.layers.append({"price": state.current_price, "amount": bought})
                                 update_db_layers(coin, state.layers)
+                                await self.send_tg(f"⚔️ *Aggressive Buy L{l_idx+1}*: {coin}\n💸 Amt: `{dynamic_amt:,.2f}` THB\n💓 Pulse: `{self.price_update_count}`")
                             state.is_trading = False
 
                 if int(time.time()) % 3600 < 10:
