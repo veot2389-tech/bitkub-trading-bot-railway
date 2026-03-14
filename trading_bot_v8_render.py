@@ -408,22 +408,46 @@ class TurboDGT:
             await asyncio.sleep(600) # 10 mins
 
     async def run_all(self):
-        init_db()
-        # ดึงราคาเริ่มต้นจาก REST API ก่อน เพื่อไม่ให้ราคาเป็น 0.00
+        # 1. ดึงราคาเริ่มต้นจาก REST API ก่อน เพื่อความรวดเร็วและไม่ให้ราคาเป็น 0.00
+        logger.info("📡 Fetching initial prices from Bitkub...")
         try:
             ticker = await self.driver.send_request("GET", "/api/market/ticker")
-            for coin, state in self.states.items():
-                sym = f"THB_{coin}"
-                if sym in ticker:
-                    state.update_price(float(ticker[sym].get("last", 0)))
-            logger.info("📋 Initial prices fetched from API.")
-        except: logger.warning("⚠️ Could not fetch initial prices, waiting for WebSocket.")
+            if ticker and isinstance(ticker, dict):
+                # Bitkub Ticker returns UPPERCASE keys like 'THB_BTC'
+                for coin, state in self.states.items():
+                    sym = f"THB_{coin.upper()}"
+                    if sym in ticker:
+                        price = float(ticker[sym].get("last", 0))
+                        state.update_price(price)
+                        logger.info(f"✅ Initial price for {coin}: {price:,.2f}")
+                    else:
+                        # ลองเช็คแบบ lowercase หรือ keys อื่นๆ
+                        for key in ticker.keys():
+                            if coin.lower() in key.lower():
+                                price = float(ticker[key].get("last", 0))
+                                state.update_price(price)
+                                logger.info(f"✅ Initial price for {coin} (found as {key}): {price:,.2f}")
+                                break
+            else:
+                logger.warning(f"⚠️ Unexpected ticker response format: {type(ticker)}")
+        except Exception as e:
+            logger.error(f"❌ Could not fetch initial prices: {e}")
 
-        stored, histories = load_db_layers(), load_bot_history()
-        for c, l in stored.items(): 
-            if c in self.states: self.states[c].layers = l
-        for c, h in histories.items():
-            if c in self.states: self.states[c].price_history = h
+        # 2. เริ่มต้นฐานข้อมูล (ย้ายมาไว้หลังดึงราคาเพื่อไม่ให้บล็อกราคา)
+        logger.info("🗄️ Initializing Supabase database...")
+        try:
+            init_db()
+            stored, histories = load_db_layers(), load_bot_history()
+            for c, l in stored.items(): 
+                if c in self.states: self.states[c].layers = l
+            for c, h in histories.items():
+                if c in self.states: self.states[c].price_history = h
+            logger.info("✅ Database and history loaded.")
+        except Exception as e:
+            logger.error(f"⚠️ Database init failed but continuing: {e}")
+
+        # 3. รัน Task ทั้งหมด
+        logger.info("🚀 Starting all background tasks...")
         await asyncio.gather(self.ws_handler(), self.trading_logic(), self.keep_alive())
 
 if __name__ == "__main__":
