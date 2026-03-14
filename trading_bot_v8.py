@@ -5,7 +5,7 @@ import asyncio
 import logging
 import sqlite3
 import threading
-import numpy as np
+import math
 import aiohttp
 import websockets
 import telebot
@@ -31,6 +31,17 @@ logging.basicConfig(
     handlers=log_handlers
 )
 logger = logging.getLogger("TurboDGT-Math-v8.8")
+
+# --- MATH UTILS ---
+def calculate_stats(data):
+    n = len(data)
+    if n < 5: return 0.0, 0.0, 0.0
+    mean = sum(data) / n
+    variance = sum((x - mean) ** 2 for x in data) / n
+    std_dev = math.sqrt(variance)
+    z_score = (data[-1] - mean) / std_dev if std_dev > 0 else 0
+    return mean, std_dev, z_score
+
 
 # --- SETTINGS ---
 
@@ -126,15 +137,8 @@ class CoinState:
             self.price_history.pop(0)
 
     def get_stats(self):
-        """คำนวณค่าสถิติขั้นสูง: Mean, Standard Deviation, Z-Score"""
-        if len(self.price_history) < 5:
-            return 0.0, 0.0, 0.0 # ข้อมูลไม่พอ
-        
-        arr = np.array(self.price_history)
-        mean = np.mean(arr)
-        std = np.std(arr)
-        z_score = (self.current_price - mean) / std if std > 0 else 0
-        return mean, std, z_score
+        """คำนวณค่าสถิติขั้นสูง: Mean, Standard Deviation, Z-Score (RAM Optimized)"""
+        return calculate_stats(self.price_history)
 
     def get_fib_multiplier(self, layer_count):
         # Fibonacci Multipliers: [Base, Fibonacci 1, Fib 2, Fib 3...]
