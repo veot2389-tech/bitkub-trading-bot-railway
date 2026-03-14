@@ -454,8 +454,18 @@ class TurboDGT:
         logger.info("🚀 Starting all background tasks...")
         await asyncio.gather(self.ws_handler(), self.trading_logic(), self.keep_alive())
 
+def telegram_polling_with_retry(tg_bot):
+    """Telegram polling with auto-retry on Error 409"""
+    while True:
+        try:
+            logger.info("📱 Starting Telegram polling...")
+            tg_bot.infinity_polling(skip_pending=True, timeout=30)
+        except Exception as e:
+            logger.warning(f"⚠️ Telegram polling crashed: {e}. Restarting in 10s...")
+            time.sleep(10)
+
 if __name__ == "__main__":
     bot = TurboDGT()
-    threading.Thread(target=lambda: bot.bot.infinity_polling(skip_pending=True), daemon=True).start()
+    threading.Thread(target=lambda: telegram_polling_with_retry(bot.bot), daemon=True).start()
     threading.Thread(target=lambda: bot.app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), use_reloader=False), daemon=True).start()
     asyncio.run(bot.run_all())
