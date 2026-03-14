@@ -374,6 +374,17 @@ class TurboDGT:
                 await asyncio.sleep(5)
             except: await asyncio.sleep(10)
 
+    async def keep_alive(self):
+        url = os.environ.get("RENDER_EXTERNAL_URL")
+        if not url: return
+        while self.running:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as resp:
+                        if resp.status == 200: logger.info("💓 Keep-alive ping sent successfully.")
+            except: pass
+            await asyncio.sleep(600) # 10 mins
+
     async def run_all(self):
         init_db()
         stored, histories = load_db_layers(), load_bot_history()
@@ -381,7 +392,7 @@ class TurboDGT:
             if c in self.states: self.states[c].layers = l
         for c, h in histories.items():
             if c in self.states: self.states[c].price_history = h
-        await asyncio.gather(self.ws_handler(), self.trading_logic())
+        await asyncio.gather(self.ws_handler(), self.trading_logic(), self.keep_alive())
 
 if __name__ == "__main__":
     bot = TurboDGT()
