@@ -98,7 +98,7 @@ class DatabaseManager:
 
     def _init_pool(self):
         try:
-            self.pool = psycopg2.pool.ThreadedConnectionPool(1, 3, self.db_url, sslmode='require')
+            self.pool = psycopg2.pool.ThreadedConnectionPool(1, 4, self.db_url, sslmode='require', options='-c client_encoding=utf8', client_encoding='utf8')
             logger.info("✅ Database Pool Ready.")
         except Exception as e: logger.error(f"❌ DB Error: {e}")
 
@@ -323,41 +323,55 @@ class TurboDGT:
         try: self.bot.send_message(TELEGRAM_CHAT_ID, text, parse_mode="Markdown")
         except: pass
 
-    async def ws_handler(self):
-        logger.info(f"🌐 Connecting to Bitkub WebSocket for symbols: {list(self.states.keys())}")
+    async def price_poller(self):
+        """Primary price updater: polls REST API every 5s (reliable on Render free tier)"""
+        logger.info("📡 Starting REST price poller (primary price source)...")
         while self.running:
             try:
-                async with websockets.connect("wss://api.bitkub.com/websocket-api/1") as ws:
+                ticker = await self.driver.send_request("GET", "/api/market/ticker")
+                if ticker and isinstance(ticker, dict):
+                    for coin, state in self.states.items():
+                        sym = f"THB_{coin.upper()}"
+                        if sym in ticker and ticker[sym].get("last"):
+                            price = float(ticker[sym]["last"])
+                            state.update_price(price)
+                            self.price_update_count += 1
+                            if self.price_update_count % 10 == 0:
+                                logger.info(f"💓 Pulse: {self.price_update_count} | {coin}: {price:,.2f}")
+            except Exception as e:
+                logger.warning(f"⚠️ Price poll error: {e}")
+            await asyncio.sleep(5)
+
+    async def ws_handler(self):
+        """Secondary price source via WebSocket (bonus, may disconnect on free tier)"""
+        logger.info(f"🌐 Starting WebSocket (secondary source) for: {list(self.states.keys())}")
+        while self.running:
+            try:
+                async with websockets.connect("wss://api.bitkub.com/websocket-api/1", ping_interval=20, ping_timeout=10) as ws:
                     for i, sym in enumerate(self.states.keys()):
-                        # ใช้ id เป็นตัวเลขเพื่อให้เป็นไปตามมาตรฐาน WebSocket
                         await ws.send(json.dumps({
                             "op": "sub", 
                             "id": i+1, 
                             "topic": f"market.ticker.thb_{sym.lower()}"
                         }))
-                    logger.info("✅ WebSocket Subscribed.")
+                    logger.info("✅ WebSocket Subscribed (secondary source).")
                     async for msg in ws:
                         try:
                             data = json.loads(msg)
                             stream = data.get("stream", "")
                             inner = data.get("data", {})
                             if isinstance(inner, dict) and inner.get("last"):
-                                # ค้นหาชื่อเหรียญที่อยู่ใน stream name เช่น market.ticker.thb_btc
                                 coin = ""
                                 for c in self.states.keys():
                                     if c.lower() in stream.lower():
                                         coin = c
                                         break
-                                
                                 if coin:
                                     self.states[coin].update_price(float(inner["last"]))
-                                    self.price_update_count += 1
-                                    if self.price_update_count % 5 == 0:
-                                        logger.info(f"💓 Pulse: {self.price_update_count} | {coin}: {inner['last']}")
                         except: continue
             except Exception as e:
-                logger.error(f"❌ WS Error: {e}")
-                await asyncio.sleep(5)
+                logger.warning(f"⚠️ WS disconnected: {e}. Reconnecting in 15s...")
+                await asyncio.sleep(15)
 
     async def trading_logic(self):
         await asyncio.sleep(5)
@@ -462,7 +476,7 @@ class TurboDGT:
 
         # 3. รัน Task ทั้งหมด
         logger.info("🚀 Starting all background tasks...")
-        await asyncio.gather(self.ws_handler(), self.trading_logic(), self.keep_alive())
+        await asyncio.gather(self.price_poller(), self.ws_handler(), self.trading_logic(), self.keep_alive())
 
 def telegram_polling_with_retry(tg_bot):
     """Telegram polling with auto-retry on Error 409"""
