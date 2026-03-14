@@ -1,28 +1,33 @@
-# Use Python 3.11 slim image
+# ใช้ Debian-based slim image (มาตรฐาน Linux)
 FROM python:3.11-slim
 
-# Set working directory
+# ตั้งค่า Working Directory
 WORKDIR /app
 
-# Install system dependencies
+# ติดตั้ง System Packages (สำหรับ Postgres และเครื่องมือ Linux พื้นฐาน)
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install
+# คัดลอกและติดตั้ง Dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# คัดลอกโค้ดทั้งหมด
 COPY . .
 
-# Environment variables
+# ให้สิทธิ์การรันสำหรับสคริปต์ .sh
+RUN chmod +x *.sh
+
+# ตั้งค่า Environment สำหรับ Linux Production
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 ENV PORT=8080
 
-# Expose port
+# Expose พอร์ตมาตรฐาน (Render ใช้ค่าจาก ENV $PORT)
 EXPOSE 8080
 
-# Run the Render Lite script (RAM Optimized)
-CMD ["python", "trading_bot_v8_render.py"]
+# คำสั่งรันบอท (Linux Style)
+CMD ["python3", "-u", "trading_bot_v8_render.py"]
