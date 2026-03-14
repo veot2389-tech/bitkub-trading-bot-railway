@@ -42,7 +42,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("TurboDGT-Rich")
 
-# --- SETTINGS ---
+# --- SETTINGS & ENV VARS ---
+API_KEY = os.environ.get("API_KEY")
+API_SECRET = os.environ.get("API_SECRET")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+SYMBOLS = ["thb_btc"]
+MIN_TRADE_THB = 10 
+DEFAULT_GRID_STEP = float(os.environ.get("GRID_STEP_PCT", 0.5)) / 100
+BUDGET_UTILIZATION = float(os.environ.get("BUDGET_UTILIZATION_PCT", 0.95))
+MAX_AMT_PER_LAYER = float(os.environ.get("MAX_AMOUNT_PER_LAYER", 2000.0))
+auto_trade_enabled = True
 
 # --- MATH UTILS ---
 def calculate_stats(data):
