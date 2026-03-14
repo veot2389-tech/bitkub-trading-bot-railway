@@ -258,9 +258,10 @@ class TurboDGT:
                         txt += f"----------------------------\n"
 
                     txt += f"💰 Today Profit: `{get_today_profit():,.2f}` THB\n"
-                    txt += f"📊 Total Unrealized: `{unrealized_total:+.2f}` THB\n"
-                    txt += f"💵 Total Equity: `{total_equity:,.2f}` THB\n"
-                    txt += f"🤖 Auto Trade: {'🟢 ON' if auto_trade_enabled else '🔴 OFF'}\n"
+                    txt += f"📊 Unrealized P/L: `{unrealized_total:+.2f} THB`\n"
+                    txt += f"💵 Total Equity: `{total_equity:,.2f} THB`\n"
+                    txt += f"----------------------------\n"
+                    txt += f"💡 *Next Step:* ตามระยะ Dynamic Grid"
                     
                     self.bot.send_message(m.chat.id, txt, parse_mode="Markdown")
                 except Exception as e:
@@ -315,17 +316,38 @@ class TurboDGT:
         except: pass
 
     async def ws_handler(self):
+        logger.info(f"🌐 Connecting to Bitkub WebSocket for symbols: {list(self.states.keys())}")
         while self.running:
             try:
                 async with websockets.connect("wss://api.bitkub.com/websocket-api/1") as ws:
-                    for sym in self.states.keys(): await ws.send(json.dumps({"op": "sub", "id": sym, "topic": f"market.ticker.thb_{sym.lower()}"}))
+                    for i, sym in enumerate(self.states.keys()):
+                        # ใช้ id เป็นตัวเลขเพื่อให้เป็นไปตามมาตรฐาน WebSocket
+                        await ws.send(json.dumps({
+                            "op": "sub", 
+                            "id": i+1, 
+                            "topic": f"market.ticker.thb_{sym.lower()}"
+                        }))
+                    logger.info("✅ WebSocket Subscribed.")
                     async for msg in ws:
-                        data = json.loads(msg)
-                        inner = data.get("data", {})
-                        if isinstance(inner, dict) and inner.get("last"):
-                            coin = data.get("stream", "").split(".")[-1].replace("thb_", "").upper()
-                            if coin in self.states: self.states[coin].update_price(float(inner["last"]))
-            except: await asyncio.sleep(5)
+                        try:
+                            data = json.loads(msg)
+                            stream = data.get("stream", "")
+                            inner = data.get("data", {})
+                            if isinstance(inner, dict) and inner.get("last"):
+                                # ค้นหาชื่อเหรียญที่อยู่ใน stream name เช่น market.ticker.thb_btc
+                                coin = ""
+                                for c in self.states.keys():
+                                    if c.lower() in stream.lower():
+                                        coin = c
+                                        break
+                                
+                                if coin:
+                                    self.states[coin].update_price(float(inner["last"]))
+                                    self.price_update_count += 1
+                        except: continue
+            except Exception as e:
+                logger.error(f"❌ WS Error: {e}")
+                await asyncio.sleep(5)
 
     async def trading_logic(self):
         await asyncio.sleep(5)
@@ -387,6 +409,16 @@ class TurboDGT:
 
     async def run_all(self):
         init_db()
+        # ดึงราคาเริ่มต้นจาก REST API ก่อน เพื่อไม่ให้ราคาเป็น 0.00
+        try:
+            ticker = await self.driver.send_request("GET", "/api/market/ticker")
+            for coin, state in self.states.items():
+                sym = f"THB_{coin}"
+                if sym in ticker:
+                    state.update_price(float(ticker[sym].get("last", 0)))
+            logger.info("📋 Initial prices fetched from API.")
+        except: logger.warning("⚠️ Could not fetch initial prices, waiting for WebSocket.")
+
         stored, histories = load_db_layers(), load_bot_history()
         for c, l in stored.items(): 
             if c in self.states: self.states[c].layers = l
