@@ -306,7 +306,6 @@ class TurboDGT:
             elif m.text == '💰 ยอดเงิน':
                 try:
                     import requests as req, hmac, hashlib, json as _json
-                    # ดึง Server Time จาก Bitkub ก่อน (สำคัญมาก! ใช้ local time จะ Error)
                     ts = int(req.get("https://api.bitkub.com/api/v3/servertime", timeout=5).json())
                     path = "/api/v3/market/balances"
                     body = {"ts": ts}
@@ -323,17 +322,19 @@ class TurboDGT:
                     r = req.post(f"https://api.bitkub.com{path}", headers=headers, data=body_str, timeout=10)
                     res = r.json()
                     if res.get('error') == 0:
-                        txt = "💰 *Balance Summary:*\n"
-                        for b in res.get('result', []):
-                            if b['symbol'] in ['THB', 'BTC']:
-                                avail = float(b['available'])
-                                reserved = float(b['reserved'])
+                        txt = "💰 *Balance Summary (สด):*\n"
+                        result = res.get('result', {})
+                        # Bitkub v3 returns dict: {"BTC": {"available": x, "reserved": y}, ...}
+                        for symbol in ['THB', 'BTC']:
+                            if symbol in result:
+                                data = result[symbol]
+                                avail = float(data.get('available', 0))
+                                reserved = float(data.get('reserved', 0))
                                 total = avail + reserved
-                                if total > 0:
-                                    txt += f"• *{b['symbol']}*:\n"
-                                    txt += f"    ├ Avail: `{avail:.8f}`\n"
-                                    txt += f"    ├ Rsrv: `{reserved:.8f}`\n"
-                                    txt += f"    └ Total: `{total:.8f}`\n"
+                                txt += f"• *{symbol}*:\n"
+                                txt += f"    ├ Avail: `{avail:.8f}`\n"
+                                txt += f"    ├ Rsrv:  `{reserved:.8f}`\n"
+                                txt += f"    └ Total: `{total:.8f}`\n"
                         self.bot.send_message(m.chat.id, txt, parse_mode="Markdown")
                     else:
                         self.bot.send_message(m.chat.id, f"❌ Bitkub Error: {res.get('error')} | {res}")
