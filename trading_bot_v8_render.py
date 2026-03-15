@@ -451,12 +451,10 @@ class TurboDGT:
                 thb_avail = float(self.current_balances.get("THB", {}).get("available", 0))
                 total_equity = thb_avail + sum((float(self.current_balances.get(c,{}).get("available",0)) + float(self.current_balances.get(c,{}).get("reserved",0))) * s.current_price for c,s in self.states.items())
                 
-                # Render Rich Table to logs
-                if int(time.time()) % 60 < 5: print_status_table(self.states, total_equity)
-
-                # --- ULTRA AGGRESSIVE FIBONACCI LOGIC ---
-                fib_scale = [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610]
-                base_unit_pct = 0.02 # เริ่มต้นที่ 2% ของพอร์ตเพื่อความดุดัน
+                # --- CONTINUOUS DCA GRID LOGIC ---
+                # เปลี่ยนให้เน้น "รับของดักซื้อได้เรื่อยๆ" ยาวๆ ไม้ไม่หมดไว
+                dca_scale = [1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2.0, 2.5, 3.0]
+                base_unit_pct = 0.012 # เริ่มซื้อที่ 1.2% ของพอร์ต (ประมาณ 12 บาท)
                 
                 if int(time.time()) % 60 < 5: print_status_table(self.states, total_equity)
 
@@ -465,10 +463,10 @@ class TurboDGT:
                     v3_sym = f"{coin.lower()}_thb"
                     
                     l_idx = len(state.layers)
-                    fib_factor = fib_scale[min(l_idx, len(fib_scale)-1)]
+                    factor = dca_scale[min(l_idx, len(dca_scale)-1)]
                     
-                    # คำนวณเงินซื้อแบบทุ่มสุดตัว: (Equity * base) * fib
-                    dynamic_amt = (total_equity * base_unit_pct) * fib_factor
+                    # คำนวณเงินซื้อแบบเน้นทยอยดักซื้อเรื่อยๆ
+                    dynamic_amt = (total_equity * base_unit_pct) * factor
                     # ปรับให้เหมาะสมกับเงินสดที่มีจริง (ใช้ให้เกลี้ยง)
                     dynamic_amt = max(MIN_TRADE_THB, min(dynamic_amt, thb_avail)) 
 
@@ -498,13 +496,13 @@ class TurboDGT:
                     if thb_avail >= dynamic_amt and thb_avail >= MIN_TRADE_THB:
                         if not state.layers or (state.current_price <= min(l['price'] for l in state.layers)*(1-state.get_dynamic_grid_step(l_idx))):
                             state.is_trading = True
-                            logger.info(f"⚔️ Aggressive Buy {coin} Layer {l_idx+1} | Amt: {dynamic_amt:,.2f} THB (Fib: {fib_factor}x)")
+                            logger.info(f"⚔️ DCA Buy {coin} Layer {l_idx+1} | Amt: {dynamic_amt:,.2f} THB (Scale: {factor}x)")
                             buy_res = await self.driver.send_request("POST", "/api/v3/market/place-bid", {"sym":v3_sym,"amt":dynamic_amt,"rat":0,"typ":"market"})
                             if buy_res.get("error") == 0:
                                 bought = (dynamic_amt * 0.9975) / state.current_price
                                 state.layers.append({"price": state.current_price, "amount": bought})
                                 update_db_layers(coin, state.layers)
-                                await self.send_tg(f"⚔️ *Aggressive Buy L{l_idx+1}*: {coin}\n💸 Amt: `{dynamic_amt:,.2f}` THB\n💓 Pulse: `{self.price_update_count}`")
+                                await self.send_tg(f"⚔️ *DCA Buy L{l_idx+1}*: {coin}\n💸 Amt: `{dynamic_amt:,.2f}` THB\n💓 Pulse: `{self.price_update_count}`")
                             state.is_trading = False
 
                 if int(time.time()) % 3600 < 10:
