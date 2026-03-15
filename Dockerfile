@@ -18,9 +18,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # คัดลอกโค้ดทั้งหมด
 COPY . .
 
-# ให้สิทธิ์การรันสำหรับสคริปต์ .sh
-RUN chmod +x *.sh
-
+# ให้สิทธิ์การรันสำหรับสคริปต์ .sh (ถ้ามี)
+RUN if ls *.sh 1> /dev/null 2>&1; then chmod +x *.sh; fi
 # ตั้งค่า Environment สำหรับ Linux Production
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
